@@ -1,0 +1,6 @@
+pytest>=8
+PyYAML>=6
+lxml>=5
+jsonschema>=4.21
+openapi-spec-validator>=0.7
+shellcheck-py>=0.10

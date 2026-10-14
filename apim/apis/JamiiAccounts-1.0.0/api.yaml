@@ -1,0 +1,73 @@
+# apictl project for JamiiAccounts 1.0.0 (APIM 4.4). Endpoint URLs are overridden per environment by api_params.yaml.
+type: api
+version: v4.4.0
+data:
+  name: JamiiAccounts
+  description: Account balance enquiry backed by the Jamii core accounts database (WSO2 MI data service).
+  context: /jamii/accounts
+  version: 1.0.0
+  provider: admin
+  lifeCycleStatus: PUBLISHED
+  isDefaultVersion: true
+  isRevision: false
+  type: HTTP
+  transport:
+  - https
+  tags:
+  - jamii
+  - accounts
+  - balance
+  policies:
+  - Gold
+  apiThrottlingPolicy: Unlimited
+  authorizationHeader: Authorization
+  apiKeyHeader: apikey
+  securityScheme:
+  - oauth2
+  - oauth_basic_auth_api_key_mandatory
+  visibility: PUBLIC
+  visibleRoles: []
+  accessControl: NONE
+  responseCachingEnabled: false
+  cacheTimeout: 300
+  enableSchemaValidation: false
+  businessInformation:
+    businessOwner: Jamii Digital Channels
+    businessOwnerEmail: digital@jamii.example
+    technicalOwner: Jamii Integration Team
+    technicalOwnerEmail: integration@jamii.example
+  corsConfiguration:
+    corsConfigurationEnabled: false
+    accessControlAllowOrigins:
+    - '*'
+    accessControlAllowCredentials: false
+    accessControlAllowHeaders:
+    - authorization
+    - apikey
+    - Content-Type
+    - X-Correlation-ID
+    accessControlAllowMethods:
+    - GET
+    - POST
+  endpointConfig:
+    endpoint_type: http
+    production_endpoints:
+      url: http://jamii-mi:8290/accounts
+    sandbox_endpoints:
+      url: http://jamii-mi:8290/accounts
+  endpointImplementationType: ENDPOINT
+  operations:
+  - id: ''
+    target: /{accountNumber}/balance
+    verb: GET
+    authType: Application & Application User
+    throttlingPolicy: Unlimited
+    scopes: []
+    usedProductIds: []
+    operationPolicies:
+      request: []
+      response: []
+      fault: []
+  gatewayVendor: wso2
+  gatewayType: wso2/synapse
+  asyncTransportProtocols: []

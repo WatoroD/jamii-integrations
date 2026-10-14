@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Jamii Savings - WSO2 Micro Integrator integration project (MI 4.4.x project layout).
+  `mvn clean install` produces target/JamiiIntegrations_<version>.car, a single composite
+  application containing all three Part 1 APIs, the bonus dashboard, the data service,
+  shared sequences, endpoints and local entries.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>ke.co.jamii.integration</groupId>
+  <artifactId>JamiiIntegrations</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <name>JamiiIntegrations</name>
+  <description>Jamii Savings integrations: account balance (DB), customer proxy (HTTP), loan eligibility (SOAP)</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.runtime.version>4.4.0</project.runtime.version>
+    <car.plugin.version>5.2.99</car.plugin.version>
+  </properties>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.wso2.maven</groupId>
+        <artifactId>vscode-car-plugin</artifactId>
+        <version>${car.plugin.version}</version>
+        <extensions>true</extensions>
+        <executions>
+          <execution>
+            <id>car-generation</id>
+            <phase>package</phase>
+            <goals>
+              <goal>car</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <archiveLocation>${project.build.directory}</archiveLocation>
+          <archiveName>${project.artifactId}_${project.version}</archiveName>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <pluginRepositories>
+    <pluginRepository>
+      <id>wso2-nexus</id>
+      <url>https://maven.wso2.org/nexus/content/groups/wso2-public/</url>
+      <releases><enabled>true</enabled><updatePolicy>daily</updatePolicy></releases>
+      <snapshots><enabled>false</enabled></snapshots>
+    </pluginRepository>
+  </pluginRepositories>
+</project>

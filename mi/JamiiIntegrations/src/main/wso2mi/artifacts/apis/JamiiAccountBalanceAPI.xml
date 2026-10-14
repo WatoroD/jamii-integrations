@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  1a  GET /accounts/{accountNumber}/balance   (DB-backed, via JamiiAccountDataService)
+
+  200  {accountNumber,status,balance{amount,currency},requestId,timestamp}
+  400  INVALID_ACCOUNT_NUMBER   - path param is not exactly 10 digits (rejected before any DB call)
+  404  ACCOUNT_NOT_FOUND        - query returned no row
+  503  DATABASE_UNAVAILABLE     - data service fault (SQL error, pool exhausted, DB down) or loopback failure
+-->
+<api xmlns="http://ws.apache.org/ns/synapse" name="JamiiAccountBalanceAPI" context="/accounts">
+  <resource methods="GET" uri-template="/{accountNumber}/balance" faultSequence="Jamii_FaultHandler">
+    <inSequence>
+      <property name="jamii.api" value="accounts-balance" scope="default" type="STRING"/>
+      <property name="jamii.backend" value="JamiiAccountDataService" scope="default" type="STRING"/>
+      <property name="jamii.backendType" value="DATABASE" scope="default" type="STRING"/>
+      <property name="jamii.rawRef" expression="get-property('uri.var.accountNumber')" scope="default" type="STRING"/>
+      <sequence key="Jamii_InitRequest"/>
+
+      <filter source="get-property('uri.var.accountNumber')" regex="^[0-9]{10}$">
+        <then>
+          <property name="REST_URL_POSTFIX" scope="axis2" action="remove"/>
+          <header name="Accept" scope="transport" value="application/xml"/>
+          <sequence key="Jamii_LogBackendCall"/>
+          <call>
+            <endpoint key="JamiiAccountDataServiceEP"/>
+          </call>
+          <sequence key="Jamii_LogBackendResponse"/>
+
+          <filter description="ds-failure-check"
+                  xpath="boolean($body/*[local-name()='Fault' or local-name()='DataServiceFault']) or number(get-property('jamii.backendStatus')) != 200">
+            <then>
+              <!-- DataServiceFault (SQL/pool/connectivity). Raw fault text stays in the log only. -->
+              <log category="ERROR" level="custom">
+                <property name="event" value="DB_FAILURE"/>
+                <!-- ds_code only (DataServiceFault also echoes current_params, i.e. the account number) -->
+                <property name="dsCode" expression="normalize-space($body//*[local-name()='ds_code'])"/>
+                <property name="faultString" expression="substring(translate(normalize-space($body//*[local-name()='faultstring' or local-name()='nested_exception']), '0123456789', '##########'), 1, 200)"/>
+                <property name="requestId" expression="get-property('jamii.requestId')"/>
+              </log>
+              <property name="jamii.err.status" value="503" scope="default" type="STRING"/>
+              <property name="jamii.err.code" value="DATABASE_UNAVAILABLE" scope="default" type="STRING"/>
+              <property name="jamii.err.message" value="The account store is temporarily unavailable. Please retry later." scope="default" type="STRING"/>
+              <sequence key="Jamii_ErrorResponse"/>
+            </then>
+            <else>
+              <filter description="ds-not-found-check" xpath="count($body//*[local-name()='Account']) = 0">
+                <then>
+                  <property name="jamii.err.status" value="404" scope="default" type="STRING"/>
+                  <property name="jamii.err.code" value="ACCOUNT_NOT_FOUND" scope="default" type="STRING"/>
+                  <property name="jamii.err.message" value="No account exists for the supplied account number." scope="default" type="STRING"/>
+                  <sequence key="Jamii_ErrorResponse"/>
+                </then>
+                <else>
+                  <payloadFactory media-type="json" description="balance-envelope">
+                    <format>{"accountNumber":"$1","status":"$2","balance":{"amount":$3,"currency":"$4"},"requestId":"$5","timestamp":"$6"}</format>
+                    <args>
+                      <arg evaluator="xml" expression="string($body//*[local-name()='Account'][1]/*[local-name()='accountNumber'])"/>
+                      <arg evaluator="xml" expression="string($body//*[local-name()='Account'][1]/*[local-name()='status'])"/>
+                      <arg evaluator="xml" expression="string($body//*[local-name()='Account'][1]/*[local-name()='balance'])"/>
+                      <arg evaluator="xml" expression="string($body//*[local-name()='Account'][1]/*[local-name()='currency'])"/>
+                      <arg evaluator="xml" expression="get-property('jamii.requestId')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.timestamp')"/>
+                    </args>
+                  </payloadFactory>
+                  <property name="jamii.httpStatus" value="200" scope="default" type="STRING"/>
+                  <sequence key="Jamii_SendResponse"/>
+                </else>
+              </filter>
+            </else>
+          </filter>
+        </then>
+        <else>
+          <property name="jamii.err.status" value="400" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="INVALID_ACCOUNT_NUMBER" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="accountNumber must be exactly 10 digits." scope="default" type="STRING"/>
+          <sequence key="Jamii_ErrorResponse"/>
+        </else>
+      </filter>
+    </inSequence>
+  </resource>
+</api>

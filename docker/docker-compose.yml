@@ -1,0 +1,67 @@
+# Local / CI target environment: MySQL + Micro Integrator + API Manager (all-in-one).
+#   docker compose -f docker/docker-compose.yml up -d --build --wait
+# The pipeline hot-deploys the CAR into ./runtime/mi-carbonapps and imports APIs with apictl.
+name: jamii
+
+services:
+  jamii-db:
+    image: mysql:8.4
+    # Small footprint: the whole stack has to fit on a dev laptop / CI agent.
+    command: ["--innodb-buffer-pool-size=32M", "--performance-schema=OFF"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${JAMII_DB_ROOT_PASSWORD:-rootpw}
+      MYSQL_DATABASE: jamii_core
+    volumes:
+      - ../db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${JAMII_DB_HOST_PORT:-3307}:3306"   # host 3306 is often taken by a local MySQL
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${JAMII_DB_ROOT_PASSWORD:-rootpw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  jamii-mi:
+    build:
+      context: ./mi
+    environment:
+      # $SYSTEM:... values injected into the data service and endpoints
+      JVM_MEM_OPTS: "-Xms256m -Xmx512m"
+      JAMII_DB_DRIVER: com.mysql.cj.jdbc.Driver
+      JAMII_DB_URL: jdbc:mysql://jamii-db:3306/jamii_core?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=5000
+      JAMII_DB_USER: jamii_mi
+      JAMII_DB_PASSWORD: ${JAMII_DB_PASSWORD:-jamii_mi_pw}
+      # Literal value (no ${} interpolation because of the braces). Override with a compose
+      # override file, e.g. append ?delay=5000 to exercise the 3 s timeout -> 504 BACKEND_TIMEOUT.
+      CUSTOMER_BACKEND_URI: "https://dummyjson.com/users/{uri.var.customerId}"
+      LOAN_SOAP_BACKEND_URL: ${LOAN_SOAP_BACKEND_URL:-http://www.dneonline.com/calculator.asmx}
+    volumes:
+      - ./runtime/mi-carbonapps:/home/wso2carbon/wso2mi-4.4.0/repository/deployment/server/carbonapps
+    ports:
+      - "8290:8290"   # HTTP API traffic (direct MI access for smoke tests only)
+      - "9164:9164"   # Management API (deployment verification)
+    depends_on:
+      jamii-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9201/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  jamii-apim:
+    image: wso2/wso2am:4.4.0
+    environment:
+      JVM_MEM_OPTS: "-Xms512m -Xmx1024m"
+    ports:
+      - "9443:9443"   # Publisher / DevPortal / Admin / REST APIs
+      - "8243:8243"   # Gateway HTTPS
+      - "8280:8280"   # Gateway HTTP
+    depends_on:
+      jamii-mi:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -skf https://localhost:9443/services/Version || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40

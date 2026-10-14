@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shared fault sequence for all Jamii API resources. Converts runtime/transport faults into the
+  common error envelope. Raw ERROR_MESSAGE (which can contain stack traces, hostnames, SQL) is
+  logged (truncated) but NEVER returned to the client.
+
+  Synapse error codes used:
+    101504 connection timed out, 101505 connection closed, 101508 connect timeout   -> 504
+    101500/101501 send/receive IO error, 101503 connection failed, 101506 protocol
+    violation, 101507 connect cancelled, 303000-303002/303100 endpoint not ready /
+    suspended                                                                         -> 503
+  Context overrides:
+    jamii.stage = VALIDATION    -> 400 MALFORMED_REQUEST (body could not be parsed)
+    jamii.backendType = DATABASE -> 503 DATABASE_UNAVAILABLE for any backend failure
+-->
+<sequence name="Jamii_FaultHandler" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <log category="WARN" level="custom">
+    <property name="event" value="FAULT"/>
+    <property name="api" expression="get-property('jamii.api')"/>
+    <property name="stage" expression="get-property('jamii.stage')"/>
+    <property name="errorCode" expression="get-property('ERROR_CODE')"/>
+    <!-- digits masked: transport errors embed the backend URL, which can carry an account number -->
+    <property name="errorMessage" expression="substring(translate(get-property('ERROR_MESSAGE'), '0123456789', '##########'), 1, 200)"/>
+    <property name="requestId" expression="get-property('jamii.requestId')"/>
+  </log>
+
+  <property name="jamii.err.status" value="500" scope="default" type="STRING"/>
+  <property name="jamii.err.code" value="INTERNAL_ERROR" scope="default" type="STRING"/>
+  <property name="jamii.err.message" value="An unexpected error occurred. Quote the requestId when contacting support." scope="default" type="STRING"/>
+
+  <filter xpath="get-property('jamii.stage') = 'VALIDATION'">
+    <then>
+      <property name="jamii.err.status" value="400" scope="default" type="STRING"/>
+      <property name="jamii.err.code" value="MALFORMED_REQUEST" scope="default" type="STRING"/>
+      <property name="jamii.err.message" value="The request body could not be parsed as JSON." scope="default" type="STRING"/>
+    </then>
+    <else>
+      <switch source="get-property('ERROR_CODE')">
+        <case regex="101504|101505|101508">
+          <property name="jamii.err.status" value="504" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="BACKEND_TIMEOUT" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="The upstream service did not respond in time. Please retry later." scope="default" type="STRING"/>
+        </case>
+        <case regex="101500|101501|101503|101506|101507|303000|303001|303002|303100">
+          <property name="jamii.err.status" value="503" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="BACKEND_UNAVAILABLE" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="The upstream service is currently unavailable. Please retry later." scope="default" type="STRING"/>
+        </case>
+        <default/>
+      </switch>
+      <filter xpath="get-property('jamii.backendType') = 'DATABASE' and get-property('jamii.stage') = 'BACKEND_CALL'">
+        <then>
+          <property name="jamii.err.status" value="503" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="DATABASE_UNAVAILABLE" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="The account store is temporarily unavailable. Please retry later." scope="default" type="STRING"/>
+        </then>
+      </filter>
+    </else>
+  </filter>
+  <sequence key="Jamii_ErrorResponse"/>
+  <drop/>
+</sequence>

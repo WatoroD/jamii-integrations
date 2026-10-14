@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logs the outbound backend call. Expects jamii.backend (logical backend name). -->
+<sequence name="Jamii_LogBackendCall" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <property name="jamii.stage" value="BACKEND_CALL" scope="default" type="STRING"/>
+  <property name="jamii.backendStart" expression="get-property('SYSTEM_TIME')" scope="default" type="STRING"/>
+  <log category="INFO" level="custom">
+    <property name="event" value="BACKEND_CALL"/>
+    <property name="api" expression="get-property('jamii.api')"/>
+    <property name="backend" expression="get-property('jamii.backend')"/>
+    <property name="ref" expression="get-property('jamii.maskedRef')"/>
+    <property name="requestId" expression="get-property('jamii.requestId')"/>
+  </log>
+</sequence>

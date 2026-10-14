@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  1c  POST /loans/eligibility   REST/JSON  ->  SOAP 1.1 (DNE Online Calculator, op Divide)  ->  JSON
+
+  Affordability model (simplified, interest-free): the SOAP engine computes the debt-to-income
+  ratio in whole percent
+      DTI% = floor( (existingMonthlyDebt + requestedAmount/termMonths) * 100 / monthlyIncome )
+  i.e. Divide(intA = obligations x 100, intB = monthlyIncome). Eligible when DTI% <= 40.
+
+  400 INVALID_REQUEST            - fails JSON schema
+  400 MALFORMED_REQUEST          - body is not parseable JSON
+  415 UNSUPPORTED_MEDIA_TYPE     - Content-Type is not application/json
+  422 ELIGIBILITY_INPUT_REJECTED - SOAP Client fault: backend cannot accept the values (e.g. int32 overflow)
+  502 BACKEND_ERROR              - SOAP Server fault or unparseable SOAP response
+  503/504                        - backend unavailable / timeout (Jamii_FaultHandler)
+  SOAP fault XML (which from this backend includes .NET stack traces) is never returned.
+-->
+<api xmlns="http://ws.apache.org/ns/synapse" name="JamiiLoanEligibilityAPI" context="/loans">
+  <resource methods="POST" uri-template="/eligibility" faultSequence="Jamii_FaultHandler">
+    <inSequence>
+      <property name="jamii.api" value="loans-eligibility" scope="default" type="STRING"/>
+      <property name="jamii.backend" value="DNEOnline-Calculator-SOAP" scope="default" type="STRING"/>
+      <property name="jamii.backendType" value="SOAP" scope="default" type="STRING"/>
+      <property name="jamii.loan.maxDti" value="40" scope="default" type="STRING"/>
+      <sequence key="Jamii_InitRequest"/>
+
+      <filter source="$trp:Content-Type" regex="(?i)application/json.*">
+        <then>
+          <!-- Anything thrown while building/validating the body is a client error (400), not a 500. -->
+          <property name="jamii.stage" value="VALIDATION" scope="default" type="STRING"/>
+          <validate cache-schema="true">
+            <schema key="LoanEligibilityRequestSchema"/>
+            <on-fail>
+              <property name="jamii.err.status" value="400" scope="default" type="STRING"/>
+              <property name="jamii.err.code" value="INVALID_REQUEST" scope="default" type="STRING"/>
+              <property name="jamii.err.message" value="The request body does not satisfy the LoanEligibilityRequest schema." scope="default" type="STRING"/>
+              <property name="jamii.err.details" expression="get-property('ERROR_MESSAGE')" scope="default" type="STRING"/>
+              <sequence key="Jamii_ErrorResponse"/>
+              <drop/>
+            </on-fail>
+          </validate>
+
+          <property name="jamii.loan.customerId" expression="json-eval($.customerId)" scope="default" type="STRING"/>
+          <property name="jamii.loan.monthlyIncome" expression="json-eval($.monthlyIncome)" scope="default" type="STRING"/>
+          <property name="jamii.loan.existingMonthlyDebt" expression="json-eval($.existingMonthlyDebt)" scope="default" type="STRING"/>
+          <property name="jamii.loan.requestedAmount" expression="json-eval($.requestedAmount)" scope="default" type="STRING"/>
+          <property name="jamii.loan.termMonths" expression="json-eval($.termMonths)" scope="default" type="STRING"/>
+          <property name="jamii.stage" value="REQUEST_MAPPING" scope="default" type="STRING"/>
+
+          <!-- Derived values (XPath 1.0 arithmetic). Wrapped in string(): a bare numeric result is stored
+               via Double.toString ("2750000.0"), which the .NET int parser rejects as a soap:Client fault;
+               XPath string() renders integral values without the ".0". -->
+          <property name="jamii.loan.installment" scope="default" type="STRING"
+                    expression="string(round(number(get-property('jamii.loan.requestedAmount')) div number(get-property('jamii.loan.termMonths')) * 100) div 100)"/>
+          <property name="jamii.loan.soapIntA" scope="default" type="STRING"
+                    expression="string(round((number(get-property('jamii.loan.existingMonthlyDebt')) + number(get-property('jamii.loan.installment'))) * 100))"/>
+          <property name="jamii.loan.soapIntB" scope="default" type="STRING"
+                    expression="string(round(number(get-property('jamii.loan.monthlyIncome'))))"/>
+          <property name="jamii.loan.maxAffordable" scope="default" type="STRING"
+                    expression="string(round(number(number(get-property('jamii.loan.monthlyIncome')) * number(get-property('jamii.loan.maxDti')) div 100 - number(get-property('jamii.loan.existingMonthlyDebt')) &gt; 0) * (number(get-property('jamii.loan.monthlyIncome')) * number(get-property('jamii.loan.maxDti')) div 100 - number(get-property('jamii.loan.existingMonthlyDebt'))) * 100) div 100)"/>
+
+          <!-- JSON -> SOAP 1.1 request -->
+          <payloadFactory media-type="xml" description="soap-request">
+            <format>
+              <tem:Divide xmlns:tem="http://tempuri.org/">
+                <tem:intA>$1</tem:intA>
+                <tem:intB>$2</tem:intB>
+              </tem:Divide>
+            </format>
+            <args>
+              <arg evaluator="xml" expression="get-property('jamii.loan.soapIntA')"/>
+              <arg evaluator="xml" expression="get-property('jamii.loan.soapIntB')"/>
+            </args>
+          </payloadFactory>
+          <property name="REST_URL_POSTFIX" scope="axis2" action="remove"/>
+          <header name="Content-Type" scope="transport" action="remove"/>
+          <property name="messageType" value="text/xml" scope="axis2" type="STRING"/>
+          <property name="ContentType" value="text/xml" scope="axis2" type="STRING"/>
+          <property name="DISABLE_CHUNKING" value="true" scope="axis2" type="STRING"/>
+          <header name="Action" value="http://tempuri.org/Divide"/>
+          <sequence key="Jamii_LogBackendCall"/>
+          <call>
+            <endpoint key="LoanEligibilitySoapEP"/>
+          </call>
+          <sequence key="Jamii_LogBackendResponse"/>
+
+          <filter description="soap-fault-check" xpath="boolean($body/*[local-name()='Fault'])">
+            <then>
+              <property name="jamii.soap.faultCode" scope="default" type="STRING"
+                        expression="normalize-space($body/*[local-name()='Fault']/*[local-name()='faultcode' or local-name()='Code'])"/>
+              <!-- Ops-only diagnostics: fault code + first line of faultstring. Not returned to clients. -->
+              <log category="WARN" level="custom">
+                <property name="event" value="SOAP_FAULT"/>
+                <property name="faultCode" expression="get-property('jamii.soap.faultCode')"/>
+                <property name="faultString" expression="substring(translate(normalize-space(substring-before(concat($body/*[local-name()='Fault']/*[local-name()='faultstring'], '&#10;'), '&#10;')), '0123456789', '##########'), 1, 160)"/>
+                <property name="requestId" expression="get-property('jamii.requestId')"/>
+              </log>
+              <filter description="soap-client-fault-check"
+                      xpath="contains(get-property('jamii.soap.faultCode'), 'Client') or contains(get-property('jamii.soap.faultCode'), 'Sender')">
+                <then>
+                  <property name="jamii.err.status" value="422" scope="default" type="STRING"/>
+                  <property name="jamii.err.code" value="ELIGIBILITY_INPUT_REJECTED" scope="default" type="STRING"/>
+                  <property name="jamii.err.message" value="The eligibility engine could not assess these values (amounts exceed the range it supports)." scope="default" type="STRING"/>
+                </then>
+                <else>
+                  <property name="jamii.err.status" value="502" scope="default" type="STRING"/>
+                  <property name="jamii.err.code" value="BACKEND_ERROR" scope="default" type="STRING"/>
+                  <property name="jamii.err.message" value="The eligibility service failed to process the request." scope="default" type="STRING"/>
+                </else>
+              </filter>
+              <sequence key="Jamii_ErrorResponse"/>
+            </then>
+            <else>
+              <filter description="soap-result-check"
+                      xpath="string(number(normalize-space($body//*[local-name()='DivideResult']))) != 'NaN'">
+                <then>
+                  <property name="jamii.loan.dti" scope="default" type="STRING"
+                            expression="string(number(normalize-space($body//*[local-name()='DivideResult'])))"/>
+                  <property name="jamii.loan.eligible" scope="default" type="STRING"
+                            expression="string(number(get-property('jamii.loan.dti')) &lt;= number(get-property('jamii.loan.maxDti')))"/>
+                  <filter source="get-property('jamii.loan.eligible')" regex="true">
+                    <then>
+                      <property name="jamii.loan.decision" value="ELIGIBLE" scope="default" type="STRING"/>
+                    </then>
+                    <else>
+                      <property name="jamii.loan.decision" value="NOT_ELIGIBLE" scope="default" type="STRING"/>
+                    </else>
+                  </filter>
+                  <payloadFactory media-type="json" description="eligibility-response">
+                    <format>{"customerId":"$1","eligible":$2,"decision":"$3","assessment":{"debtToIncomeRatioPercent":$4,"maxDebtToIncomeRatioPercent":$5,"proposedMonthlyInstallment":$6,"maxAffordableMonthlyInstallment":$7,"currency":"KES"},"requestId":"$8","timestamp":"$9"}</format>
+                    <args>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.customerId')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.eligible')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.decision')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.dti')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.maxDti')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.installment')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.loan.maxAffordable')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.requestId')"/>
+                      <arg evaluator="xml" expression="get-property('jamii.timestamp')"/>
+                    </args>
+                  </payloadFactory>
+                  <property name="jamii.httpStatus" value="200" scope="default" type="STRING"/>
+                  <sequence key="Jamii_SendResponse"/>
+                </then>
+                <else>
+                  <property name="jamii.err.status" value="502" scope="default" type="STRING"/>
+                  <property name="jamii.err.code" value="BACKEND_ERROR" scope="default" type="STRING"/>
+                  <property name="jamii.err.message" value="The eligibility service returned an unexpected response." scope="default" type="STRING"/>
+                  <sequence key="Jamii_ErrorResponse"/>
+                </else>
+              </filter>
+            </else>
+          </filter>
+        </then>
+        <else>
+          <property name="jamii.err.status" value="415" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="UNSUPPORTED_MEDIA_TYPE" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="Content-Type must be application/json." scope="default" type="STRING"/>
+          <sequence key="Jamii_ErrorResponse"/>
+        </else>
+      </filter>
+    </inSequence>
+  </resource>
+</api>

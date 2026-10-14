@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logs the backend response status and latency. Never logs the payload (PII). -->
+<sequence name="Jamii_LogBackendResponse" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <property name="jamii.stage" value="RESPONSE_MAPPING" scope="default" type="STRING"/>
+  <property name="jamii.backendStatus" expression="$axis2:HTTP_SC" scope="default" type="STRING"/>
+  <log category="INFO" level="custom">
+    <property name="event" value="BACKEND_RESPONSE"/>
+    <property name="api" expression="get-property('jamii.api')"/>
+    <property name="backend" expression="get-property('jamii.backend')"/>
+    <property name="backendStatus" expression="get-property('jamii.backendStatus')"/>
+    <property name="backendLatencyMs" expression="number(get-property('SYSTEM_TIME')) - number(get-property('jamii.backendStart'))"/>
+    <property name="requestId" expression="get-property('jamii.requestId')"/>
+  </log>
+</sequence>

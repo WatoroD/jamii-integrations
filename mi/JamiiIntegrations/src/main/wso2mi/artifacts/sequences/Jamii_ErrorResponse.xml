@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Builds the ONE error envelope used by every Jamii API, whatever the backend (DB, HTTP, SOAP):
+  {"error":{"code","message","status","requestId","timestamp"[,"details"]}}
+  Expects: jamii.err.status, jamii.err.code, jamii.err.message, optional jamii.err.details.
+  Messages are constants defined in the APIs; details are sanitised (quotes, backslashes and
+  control characters removed) so client-influenced text cannot break the JSON.
+-->
+<sequence name="Jamii_ErrorResponse" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <property name="jamii.err.details" scope="default" type="STRING"
+            expression="substring(normalize-space(translate(get-property('jamii.err.details'), '&quot;\&#9;&#10;&#13;', '')), 1, 300)"/>
+  <filter xpath="string-length(get-property('jamii.err.details')) &gt; 0">
+    <then>
+      <payloadFactory media-type="json">
+        <format>{"error":{"code":"$1","message":"$2","status":$3,"requestId":"$4","timestamp":"$5","details":"$6"}}</format>
+        <args>
+          <arg evaluator="xml" expression="get-property('jamii.err.code')"/>
+          <arg evaluator="xml" expression="get-property('jamii.err.message')"/>
+          <arg evaluator="xml" expression="get-property('jamii.err.status')"/>
+          <arg evaluator="xml" expression="get-property('jamii.requestId')"/>
+          <arg evaluator="xml" expression="get-property('jamii.timestamp')"/>
+          <arg evaluator="xml" expression="get-property('jamii.err.details')"/>
+        </args>
+      </payloadFactory>
+    </then>
+    <else>
+      <payloadFactory media-type="json">
+        <format>{"error":{"code":"$1","message":"$2","status":$3,"requestId":"$4","timestamp":"$5"}}</format>
+        <args>
+          <arg evaluator="xml" expression="get-property('jamii.err.code')"/>
+          <arg evaluator="xml" expression="get-property('jamii.err.message')"/>
+          <arg evaluator="xml" expression="get-property('jamii.err.status')"/>
+          <arg evaluator="xml" expression="get-property('jamii.requestId')"/>
+          <arg evaluator="xml" expression="get-property('jamii.timestamp')"/>
+        </args>
+      </payloadFactory>
+    </else>
+  </filter>
+  <property name="jamii.httpStatus" expression="get-property('jamii.err.status')" scope="default" type="STRING"/>
+  <log category="WARN" level="custom">
+    <property name="event" value="ERROR_RESPONSE"/>
+    <property name="api" expression="get-property('jamii.api')"/>
+    <property name="status" expression="get-property('jamii.err.status')"/>
+    <property name="code" expression="get-property('jamii.err.code')"/>
+    <property name="ref" expression="get-property('jamii.maskedRef')"/>
+    <property name="requestId" expression="get-property('jamii.requestId')"/>
+  </log>
+  <sequence key="Jamii_SendResponse"/>
+</sequence>

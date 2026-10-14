@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Runtime hook: invoked when a request matches an API context but no resource/method.
+     Returns the common error envelope instead of an empty 404/405. -->
+<sequence name="_resource_mismatch_handler_" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <property name="jamii.api" expression="get-property('SYNAPSE_REST_API')" scope="default" type="STRING"/>
+  <sequence key="Jamii_InitRequest"/>
+  <property name="jamii.err.status" value="404" scope="default" type="STRING"/>
+  <property name="jamii.err.code" value="RESOURCE_NOT_FOUND" scope="default" type="STRING"/>
+  <property name="jamii.err.message" value="No resource matches the requested path and method." scope="default" type="STRING"/>
+  <sequence key="Jamii_ErrorResponse"/>
+  <drop/>
+</sequence>

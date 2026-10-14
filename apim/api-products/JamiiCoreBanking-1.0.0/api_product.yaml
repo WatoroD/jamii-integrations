@@ -1,0 +1,60 @@
+# API Product grouping the three Jamii APIs (apictl import api-product). Dependent APIs are imported first by deploy-apim.sh.
+type: api_product
+version: v4.4.0
+data:
+  name: JamiiCoreBanking
+  context: /jamii/core-banking
+  version: 1.0.0
+  provider: admin
+  description: 'Jamii Savings core banking bundle: account balance, customer profile + dashboard, loan eligibility. One subscription,
+    one OAuth2 credential.'
+  state: PUBLISHED
+  visibility: PUBLIC
+  visibleRoles: []
+  accessControl: NONE
+  transport:
+  - https
+  tags:
+  - jamii
+  - bundle
+  policies:
+  - Gold
+  apiThrottlingPolicy: Unlimited
+  securityScheme:
+  - oauth2
+  - oauth_basic_auth_api_key_mandatory
+  authorizationHeader: Authorization
+  gatewayVendor: wso2
+  apis:
+  - name: JamiiAccounts
+    version: 1.0.0
+    provider: admin
+    operations:
+    - target: /{accountNumber}/balance
+      verb: GET
+      authType: Application & Application User
+      throttlingPolicy: Unlimited
+      scopes: []
+  - name: JamiiCustomers
+    version: 1.0.0
+    provider: admin
+    operations:
+    - target: /{customerId}
+      verb: GET
+      authType: Application & Application User
+      throttlingPolicy: Unlimited
+      scopes: []
+    - target: /{customerId}/dashboard
+      verb: GET
+      authType: Application & Application User
+      throttlingPolicy: Unlimited
+      scopes: []
+  - name: JamiiLoans
+    version: 1.0.0
+    provider: admin
+    operations:
+    - target: /eligibility
+      verb: POST
+      authType: Application & Application User
+      throttlingPolicy: Unlimited
+      scopes: []

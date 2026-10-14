@@ -1,0 +1,17 @@
+<!-- jamiiConsumerContext v1 : rendered into the gateway's request flow by API Manager -->
+<property name="jamii.gw.cid" expression="$trp:{{correlationHeader}}" scope="default" type="STRING"/>
+<filter source="boolean(get-property('jamii.gw.cid'))" regex="false">
+  <then>
+    <property name="jamii.gw.cid" expression="substring-after(get-property('MessageID'), 'urn:uuid:')" scope="default" type="STRING"/>
+    <header name="{{correlationHeader}}" scope="transport" expression="get-property('jamii.gw.cid')"/>
+  </then>
+</filter>
+<!-- Overwrite (never trust) any client-supplied values for these headers. -->
+<header name="X-Jamii-Consumer-App" scope="transport" expression="get-property('api.ut.application.name')"/>
+<header name="X-Jamii-Channel" scope="transport" value="{{channel}}"/>
+<log level="custom">
+  <property name="event" value="GATEWAY_POLICY"/>
+  <property name="policy" value="jamiiConsumerContext"/>
+  <property name="correlationId" expression="get-property('jamii.gw.cid')"/>
+  <property name="consumerApp" expression="get-property('api.ut.application.name')"/>
+</log>

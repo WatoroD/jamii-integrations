@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Bonus A: gathers the clone branches of /customers/{id}/dashboard.
+  Every branch ALWAYS contributes a section document - success, NOT_FOUND, or UNAVAILABLE
+  (failures are converted by Dashboard_BranchFault) - so the aggregate normally completes as soon
+  as both branches answer. The 6 s completion timeout is only a backstop; a section that never
+  arrives is reported as UNAVAILABLE/TIMEOUT.
+
+  Policy (see README "Bonus A"):
+    profile NOT_FOUND                    -> 404 CUSTOMER_NOT_FOUND (the customer does not exist)
+    both sections unavailable            -> 503 BACKEND_UNAVAILABLE (nothing useful to show)
+    exactly one section unavailable      -> 200 with "partial": true and that section flagged
+-->
+<sequence name="Dashboard_Collect" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <aggregate id="jamiiDashboard">
+    <completeCondition timeout="6">
+      <messageCount min="-1" max="-1"/>
+    </completeCondition>
+    <onComplete expression="json-eval($)">
+      <script language="js"><![CDATA[
+        var raw = mc.getPayloadJSON();
+        var parts = [];
+        // Normalise the aggregated shape (array, single object, or an object wrapping an array).
+        if (raw instanceof Array) {
+          parts = raw;
+        } else if (raw && raw.section) {
+          parts = [raw];
+        } else if (raw) {
+          for (var k in raw) { if (raw[k] instanceof Array) { parts = raw[k]; break; } }
+        }
+        var sections = {};
+        for (var i = 0; i < parts.length; i++) {
+          if (parts[i] && parts[i].section) { sections[String(parts[i].section)] = parts[i]; }
+        }
+        var timedOut = function (name) { return { section: name, status: 'UNAVAILABLE', reason: 'TIMEOUT' }; };
+        var profile = sections.profile || timedOut('profile');
+        var accounts = sections.accounts || timedOut('accounts');
+
+        // Data-service JSON is converted from XML: a single row may arrive as an object rather
+        // than an array, and all-digit strings may arrive as numbers. Normalise both.
+        var accountList = [];
+        if (String(accounts.status) === 'OK') {
+          var d = accounts.data || {};
+          var wrapper = d.CustomerAccounts || d.Accounts || d;
+          var rows = (wrapper && (wrapper.CustomerAccount || wrapper.Account)) || [];
+          if (!(rows instanceof Array)) { rows = [rows]; }
+          for (var j = 0; j < rows.length; j++) {
+            var r = rows[j];
+            if (!r || !r.accountNumber) { continue; }
+            accountList.push({
+              accountNumber: String(r.accountNumber),
+              accountType: String(r.accountType),
+              status: String(r.status),
+              balance: { amount: Number(r.balance), currency: String(r.currency) }
+            });
+          }
+        }
+
+        var profileOk = String(profile.status) === 'OK';
+        var accountsOk = String(accounts.status) === 'OK';
+        var outcome = 'OK';
+        if (String(profile.status) === 'NOT_FOUND') { outcome = 'NOT_FOUND'; }
+        else if (!profileOk && !accountsOk) { outcome = 'UNAVAILABLE'; }
+
+        var response = {
+          customerId: String(mc.getProperty('uri.var.customerId')),
+          partial: !(profileOk && accountsOk),
+          profile: profileOk ? { status: 'OK', data: profile.data }
+                             : { status: String(profile.status), reason: String(profile.reason) },
+          accounts: accountsOk ? { status: 'OK', data: accountList }
+                               : { status: String(accounts.status), reason: String(accounts.reason) },
+          requestId: String(mc.getProperty('jamii.requestId')),
+          timestamp: String(mc.getProperty('jamii.timestamp'))
+        };
+        mc.setProperty('jamii.dash.outcome', outcome);
+        mc.setProperty('jamii.dash.partial', String(response.partial));
+        mc.setPayloadJSON(response);
+      ]]></script>
+      <log category="INFO" level="custom">
+        <property name="event" value="FAN_IN"/>
+        <property name="api" expression="get-property('jamii.api')"/>
+        <property name="outcome" expression="get-property('jamii.dash.outcome')"/>
+        <property name="partial" expression="get-property('jamii.dash.partial')"/>
+        <property name="requestId" expression="get-property('jamii.requestId')"/>
+      </log>
+      <switch source="get-property('jamii.dash.outcome')">
+        <case regex="NOT_FOUND">
+          <property name="jamii.err.status" value="404" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="CUSTOMER_NOT_FOUND" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="No customer exists for the supplied customerId." scope="default" type="STRING"/>
+          <sequence key="Jamii_ErrorResponse"/>
+        </case>
+        <case regex="UNAVAILABLE">
+          <property name="jamii.err.status" value="503" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="BACKEND_UNAVAILABLE" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="None of the dashboard sources are currently available. Please retry later." scope="default" type="STRING"/>
+          <sequence key="Jamii_ErrorResponse"/>
+        </case>
+        <default>
+          <property name="jamii.httpStatus" value="200" scope="default" type="STRING"/>
+          <sequence key="Jamii_SendResponse"/>
+        </default>
+      </switch>
+    </onComplete>
+  </aggregate>
+</sequence>

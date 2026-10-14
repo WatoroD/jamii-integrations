@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  1b backend: DummyJSON users API (https://dummyjson.com/users/{id}).
+  URI template is injected per environment, e.g.
+    CUSTOMER_BACKEND_URI=https://dummyjson.com/users/{uri.var.customerId}
+  (append ?delay=5000 in a test environment to exercise the timeout path).
+
+  Timeout: 3 s hard limit; on timeout the call faults (-> 504 BACKEND_TIMEOUT).
+  Circuit breaking: after 2 consecutive connection/timeout failures the endpoint is suspended
+  for 5 s, doubling up to 30 s, so a dead backend is not hammered and callers fail fast
+  (-> 503 BACKEND_UNAVAILABLE while suspended).
+-->
+<endpoint name="CustomerBackendEP" xmlns="http://ws.apache.org/ns/synapse">
+  <http method="get" uri-template="$SYSTEM:CUSTOMER_BACKEND_URI">
+    <timeout>
+      <duration>3000</duration>
+      <responseAction>fault</responseAction>
+    </timeout>
+    <markForSuspension>
+      <errorCodes>101503,101504,101505,101508</errorCodes>
+      <retriesBeforeSuspension>2</retriesBeforeSuspension>
+      <retryDelay>0</retryDelay>
+    </markForSuspension>
+    <suspendOnFailure>
+      <errorCodes>101503,101504,101505,101508</errorCodes>
+      <initialDuration>5000</initialDuration>
+      <progressionFactor>2.0</progressionFactor>
+      <maximumDuration>30000</maximumDuration>
+    </suspendOnFailure>
+  </http>
+</endpoint>

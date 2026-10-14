@@ -1,0 +1,35 @@
+type: operation_policy_specification
+version: v4.4.0
+data:
+  category: Mediation
+  name: jamiiConsumerContext
+  version: v1
+  displayName: Jamii Consumer Context
+  description: >-
+    Gateway-level mediation for Jamii APIs. Guarantees a correlation ID on every request
+    reaching the backend (generated at the gateway if the consumer did not send one) and tags
+    the request with the subscribing application's name and the channel, so MI logs can
+    attribute traffic to a consumer without trusting client-supplied headers.
+  applicableFlows:
+    - request
+  supportedGateways:
+    - Synapse
+  supportedApiTypes:
+    - HTTP
+  policyAttributes:
+    - name: correlationHeader
+      displayName: Correlation header name
+      description: Header carrying the correlation ID end to end.
+      validationRegex: "^[A-Za-z0-9-]{1,64}$"
+      type: String
+      defaultValue: X-Correlation-ID
+      required: true
+      allowedValues: []
+    - name: channel
+      displayName: Channel
+      description: Logical channel the API is exposed on (sent as X-Jamii-Channel).
+      validationRegex: "^[a-z0-9-]{1,32}$"
+      type: String
+      defaultValue: partner-api
+      required: true
+      allowedValues: []

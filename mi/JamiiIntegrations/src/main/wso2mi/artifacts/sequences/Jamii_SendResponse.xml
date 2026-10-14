@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Single exit point for every response (success and error).
+  Expects: jamii.httpStatus and a JSON payload already in the body.
+  Response headers are reset to an allow-list: backend headers (Server, Set-Cookie, CDN/tracing
+  headers...) never leak, and request headers are never echoed back on locally generated replies.
+-->
+<sequence name="Jamii_SendResponse" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <property name="TRANSPORT_HEADERS" scope="axis2" action="remove"/>
+  <!-- Repeated headers (e.g. several Set-Cookie) are kept apart from TRANSPORT_HEADERS. -->
+  <property name="EXCESS_TRANSPORT_HEADERS" scope="axis2" action="remove"/>
+  <property name="NO_ENTITY_BODY" scope="axis2" action="remove"/>
+  <property name="HTTP_SC" expression="get-property('jamii.httpStatus')" scope="axis2" type="STRING"/>
+  <property name="messageType" value="application/json" scope="axis2" type="STRING"/>
+  <property name="ContentType" value="application/json" scope="axis2" type="STRING"/>
+  <header name="X-Request-ID" scope="transport" expression="get-property('jamii.requestId')"/>
+  <header name="X-Correlation-ID" scope="transport" expression="get-property('jamii.correlationId')"/>
+  <header name="Cache-Control" scope="transport" value="no-store"/>
+  <log category="INFO" level="custom">
+    <property name="event" value="RESPONSE_OUT"/>
+    <property name="api" expression="get-property('jamii.api')"/>
+    <property name="status" expression="get-property('jamii.httpStatus')"/>
+    <property name="errorCode" expression="get-property('jamii.err.code')"/>
+    <property name="durationMs" expression="number(get-property('SYSTEM_TIME')) - number(get-property('jamii.startTime'))"/>
+    <property name="requestId" expression="get-property('jamii.requestId')"/>
+  </log>
+  <respond/>
+</sequence>

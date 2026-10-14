@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- JSON Schema (draft-04 keywords only, for validator compatibility) for POST /loans/eligibility.
+     Kept identical to components.schemas.LoanEligibilityRequest in apim/apis/JamiiLoans-1.0.0;
+     tests/test_contracts.py fails the build if the two drift. -->
+<localEntry key="LoanEligibilityRequestSchema" xmlns="http://ws.apache.org/ns/synapse"><![CDATA[{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "LoanEligibilityRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["customerId", "monthlyIncome", "existingMonthlyDebt", "requestedAmount", "termMonths"],
+  "properties": {
+    "customerId": {"type": "string", "pattern": "^[1-9][0-9]{0,8}$"},
+    "monthlyIncome": {"type": "number", "minimum": 1, "maximum": 100000000},
+    "existingMonthlyDebt": {"type": "number", "minimum": 0, "maximum": 100000000},
+    "requestedAmount": {"type": "number", "minimum": 1000, "maximum": 1000000000},
+    "termMonths": {"type": "integer", "minimum": 1, "maximum": 360},
+    "currency": {"type": "string", "enum": ["KES"]}
+  }
+}]]></localEntry>

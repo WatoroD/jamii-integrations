@@ -1,0 +1,557 @@
+openapi: 3.0.1
+info:
+  title: JamiiCoreBanking
+  version: 1.0.0
+  description: Aggregated definition of the Jamii API Product. Operations keep their original API's path.
+servers:
+- url: https://localhost:8243/jamii/core-banking/1.0.0
+security:
+- default: []
+paths:
+  /{accountNumber}/balance:
+    get:
+      tags:
+      - Accounts
+      operationId: getAccountBalance
+      summary: Get the current balance and status of an account
+      parameters:
+      - name: accountNumber
+        in: path
+        required: true
+        description: 10-digit Jamii account number.
+        schema:
+          type: string
+          pattern: ^[0-9]{10}$
+          example: '1000000001'
+      - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Account found.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Correlation-ID:
+              $ref: '#/components/headers/X-Correlation-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBalance'
+              example:
+                accountNumber: '1000000001'
+                status: ACTIVE
+                balance:
+                  amount: 152340.75
+                  currency: KES
+                requestId: 3f0c8f0e-6a8e-4c1f-9b55-0d8f4b6e2a71
+                timestamp: '2026-10-13T08:15:30.123Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown account (ACCOUNT_NOT_FOUND).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security:
+      - default: []
+      x-auth-type: Application & Application User
+      x-throttling-tier: Unlimited
+      x-wso2-source-api: JamiiAccounts
+  /{customerId}:
+    get:
+      tags:
+      - Customers
+      operationId: getCustomer
+      summary: Get a customer profile (sensitive fields removed)
+      parameters:
+      - $ref: '#/components/parameters/CustomerId'
+      - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Customer profile. Secrets and high-risk PII (password, SSN, bank card, crypto wallet, IP/MAC, biometrics)
+            are stripped by the gateway.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown customer (CUSTOMER_NOT_FOUND).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          description: Customer backend returned an unexpected response (BACKEND_ERROR).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security:
+      - default: []
+      x-auth-type: Application & Application User
+      x-throttling-tier: Unlimited
+      x-wso2-source-api: JamiiCustomers
+  /{customerId}/dashboard:
+    get:
+      tags:
+      - Customers
+      operationId: getCustomerDashboard
+      summary: Profile and accounts in one call (partial results flagged)
+      description: 'Calls the customer backend and the accounts database in parallel. If exactly one source
+
+        fails, returns 200 with "partial": true and the failed section marked UNAVAILABLE.
+
+        If the customer does not exist returns 404; if both sources fail returns 503.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/CustomerId'
+      - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Dashboard (possibly partial).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDashboard'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown customer (CUSTOMER_NOT_FOUND).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      security:
+      - default: []
+      x-auth-type: Application & Application User
+      x-throttling-tier: Unlimited
+      x-wso2-source-api: JamiiCustomers
+  /eligibility:
+    post:
+      tags:
+      - Loans
+      operationId: checkLoanEligibility
+      summary: Check whether a requested loan is affordable for a customer
+      parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanEligibilityRequest'
+            example:
+              customerId: '1'
+              monthlyIncome: 120000
+              existingMonthlyDebt: 15000
+              requestedAmount: 300000
+              termMonths: 24
+              currency: KES
+      responses:
+        '200':
+          description: Assessment completed (eligible or not).
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanEligibilityResponse'
+              example:
+                customerId: '1'
+                eligible: true
+                decision: ELIGIBLE
+                assessment:
+                  debtToIncomeRatioPercent: 22
+                  maxDebtToIncomeRatioPercent: 40
+                  proposedMonthlyInstallment: 12500
+                  maxAffordableMonthlyInstallment: 33000
+                  currency: KES
+                requestId: 3f0c8f0e-6a8e-4c1f-9b55-0d8f4b6e2a71
+                timestamp: '2026-10-13T08:15:30.123Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '415':
+          description: Content-Type is not application/json (UNSUPPORTED_MEDIA_TYPE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The eligibility engine rejected the values (ELIGIBILITY_INPUT_REJECTED - mapped from a SOAP Client
+            fault).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          description: SOAP Server fault or unparseable SOAP response (BACKEND_ERROR).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+      security:
+      - default: []
+      x-auth-type: Application & Application User
+      x-throttling-tier: Unlimited
+      x-wso2-source-api: JamiiLoans
+components:
+  schemas:
+    AccountBalance:
+      type: object
+      required:
+      - accountNumber
+      - status
+      - balance
+      - requestId
+      - timestamp
+      properties:
+        accountNumber:
+          type: string
+          pattern: ^[0-9]{10}$
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - DORMANT
+          - CLOSED
+        balance:
+          type: object
+          required:
+          - amount
+          - currency
+          properties:
+            amount:
+              type: number
+              format: double
+              example: 152340.75
+            currency:
+              type: string
+              pattern: ^[A-Z]{3}$
+              example: KES
+        requestId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      description: Common error envelope returned by every Jamii API, whatever the backend.
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          - status
+          - requestId
+          - timestamp
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable error code.
+              example: ACCOUNT_NOT_FOUND
+            message:
+              type: string
+              description: Human-readable, client-safe message. Never contains backend internals.
+            status:
+              type: integer
+              description: Mirrors the HTTP status code.
+              example: 404
+            requestId:
+              type: string
+              format: uuid
+            timestamp:
+              type: string
+              format: date-time
+            details:
+              type: string
+              description: Optional validation detail (only for INVALID_REQUEST).
+    Customer:
+      type: object
+      description: Customer profile as held by the customer master, minus stripped fields.
+      additionalProperties: {}
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        birthDate:
+          type: string
+        address:
+          type: object
+          additionalProperties: {}
+        company:
+          type: object
+          additionalProperties: {}
+    DashboardSectionStatus:
+      type: string
+      enum:
+      - OK
+      - UNAVAILABLE
+    CustomerDashboard:
+      type: object
+      required:
+      - customerId
+      - partial
+      - profile
+      - accounts
+      - requestId
+      - timestamp
+      properties:
+        customerId:
+          type: string
+        partial:
+          type: boolean
+          description: true when any section is UNAVAILABLE
+        profile:
+          type: object
+          required:
+          - status
+          properties:
+            status:
+              $ref: '#/components/schemas/DashboardSectionStatus'
+            reason:
+              type: string
+              enum:
+              - TIMEOUT
+              - UNAVAILABLE
+              - BACKEND_ERROR
+            data:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+        accounts:
+          type: object
+          required:
+          - status
+          properties:
+            status:
+              $ref: '#/components/schemas/DashboardSectionStatus'
+            reason:
+              type: string
+              enum:
+              - TIMEOUT
+              - UNAVAILABLE
+              - DATABASE_UNAVAILABLE
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  accountNumber:
+                    type: string
+                  accountType:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - ACTIVE
+                    - DORMANT
+                    - CLOSED
+                  balance:
+                    type: object
+                    properties:
+                      amount:
+                        type: number
+                      currency:
+                        type: string
+        requestId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+    LoanEligibilityRequest:
+      type: object
+      # Unknown fields are rejected by MI (LoanEligibilityRequestSchema). Not expressed here:
+      # APIM 4.4 cannot merge boolean additionalProperties into an API Product definition.
+      required:
+      - customerId
+      - monthlyIncome
+      - existingMonthlyDebt
+      - requestedAmount
+      - termMonths
+      properties:
+        customerId:
+          type: string
+          pattern: ^[1-9][0-9]{0,8}$
+        monthlyIncome:
+          type: number
+          minimum: 1
+          maximum: 100000000
+        existingMonthlyDebt:
+          type: number
+          minimum: 0
+          maximum: 100000000
+        requestedAmount:
+          type: number
+          minimum: 1000
+          maximum: 1000000000
+        termMonths:
+          type: integer
+          minimum: 1
+          maximum: 360
+        currency:
+          type: string
+          enum:
+          - KES
+    LoanEligibilityResponse:
+      type: object
+      required:
+      - customerId
+      - eligible
+      - decision
+      - assessment
+      - requestId
+      - timestamp
+      properties:
+        customerId:
+          type: string
+        eligible:
+          type: boolean
+        decision:
+          type: string
+          enum:
+          - ELIGIBLE
+          - NOT_ELIGIBLE
+        assessment:
+          type: object
+          properties:
+            debtToIncomeRatioPercent:
+              type: integer
+              description: floor((existingMonthlyDebt + requestedAmount/termMonths) x 100 / monthlyIncome)
+            maxDebtToIncomeRatioPercent:
+              type: integer
+            proposedMonthlyInstallment:
+              type: number
+            maxAffordableMonthlyInstallment:
+              type: number
+            currency:
+              type: string
+        requestId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+  responses:
+    BadRequest:
+      description: Malformed input (invalid path parameter or request body).
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid credentials (generated by the API Manager gateway).
+    TooManyRequests:
+      description: Subscription tier quota exceeded (generated by the API Manager gateway).
+    ServiceUnavailable:
+      description: Backend unavailable (DATABASE_UNAVAILABLE / BACKEND_UNAVAILABLE).
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    GatewayTimeout:
+      description: Backend did not answer in time (BACKEND_TIMEOUT).
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  headers:
+    X-Request-ID:
+      description: Unique ID of this request (equals requestId in the body).
+      schema:
+        type: string
+        format: uuid
+    X-Correlation-ID:
+      description: Echo of the caller correlation ID, or a generated one.
+      schema:
+        type: string
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: Optional caller correlation ID (8-64 chars, [A-Za-z0-9._:-]). Generated if absent or invalid.
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9._:\-]{8,64}$
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      description: Jamii customer ID (positive integer).
+      schema:
+        type: string
+        pattern: ^[1-9][0-9]{0,8}$
+        example: '1'
+  securitySchemes:
+    default:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://localhost:9443/oauth2/token
+          scopes: {}

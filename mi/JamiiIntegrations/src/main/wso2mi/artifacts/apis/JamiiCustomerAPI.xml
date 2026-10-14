@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  1b  GET /customers/{customerId}             managed proxy in front of DummyJSON /users/{id}
+  Bonus A  GET /customers/{customerId}/dashboard   parallel fan-out (DummyJSON + account DB), partial-tolerant
+
+  Gateway value added by the proxy (beyond forwarding):
+   * request:  correlation ID injected if missing/invalid, internal + credential headers stripped
+               (Jamii_InitRequest), Accept forced to JSON
+   * backend:  3 s timeout + circuit-breaker style suspension (CustomerBackendEP)
+   * response: data-minimisation - secrets and high-risk PII the backend over-shares
+               (password, SSN, EIN, bank card, crypto wallet, IP/MAC, user agent, biometrics) are
+               removed before the payload leaves Jamii; backend headers replaced by an allow-list
+   * errors:   404 / backend 4xx-5xx / timeout / unavailable mapped onto the common envelope
+-->
+<api xmlns="http://ws.apache.org/ns/synapse" name="JamiiCustomerAPI" context="/customers">
+
+  <resource methods="GET" uri-template="/{customerId}" faultSequence="Jamii_FaultHandler">
+    <inSequence>
+      <property name="jamii.api" value="customers" scope="default" type="STRING"/>
+      <property name="jamii.backend" value="DummyJSON-users" scope="default" type="STRING"/>
+      <property name="jamii.backendType" value="HTTP" scope="default" type="STRING"/>
+      <property name="jamii.rawRef" expression="get-property('uri.var.customerId')" scope="default" type="STRING"/>
+      <sequence key="Jamii_InitRequest"/>
+
+      <filter source="get-property('uri.var.customerId')" regex="^[1-9][0-9]{0,8}$">
+        <then>
+          <property name="REST_URL_POSTFIX" scope="axis2" action="remove"/>
+          <header name="Accept" scope="transport" value="application/json"/>
+          <sequence key="Jamii_LogBackendCall"/>
+          <call>
+            <endpoint key="CustomerBackendEP"/>
+          </call>
+          <sequence key="Jamii_LogBackendResponse"/>
+
+          <switch source="get-property('jamii.backendStatus')">
+            <case regex="200">
+              <!-- Script rather than enrich action="remove": enrich faults when any listed path is
+                   absent, so one upstream schema change would turn every lookup into a 500. -->
+              <script language="js" description="strip-sensitive-fields"><![CDATA[
+                var body = mc.getPayloadJSON();
+                var drop = ['password', 'ssn', 'ein', 'bank', 'crypto', 'ip', 'macAddress', 'userAgent',
+                            'bloodGroup', 'height', 'weight', 'eyeColor', 'hair'];
+                if (body) {
+                  for (var i = 0; i < drop.length; i++) { delete body[drop[i]]; }
+                  mc.setPayloadJSON(body);
+                }
+              ]]></script>
+              <property name="jamii.httpStatus" value="200" scope="default" type="STRING"/>
+              <sequence key="Jamii_SendResponse"/>
+            </case>
+            <case regex="404">
+              <property name="jamii.err.status" value="404" scope="default" type="STRING"/>
+              <property name="jamii.err.code" value="CUSTOMER_NOT_FOUND" scope="default" type="STRING"/>
+              <property name="jamii.err.message" value="No customer exists for the supplied customerId." scope="default" type="STRING"/>
+              <sequence key="Jamii_ErrorResponse"/>
+            </case>
+            <default>
+              <property name="jamii.err.status" value="502" scope="default" type="STRING"/>
+              <property name="jamii.err.code" value="BACKEND_ERROR" scope="default" type="STRING"/>
+              <property name="jamii.err.message" value="The customer service returned an unexpected response." scope="default" type="STRING"/>
+              <sequence key="Jamii_ErrorResponse"/>
+            </default>
+          </switch>
+        </then>
+        <else>
+          <property name="jamii.err.status" value="400" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="INVALID_CUSTOMER_ID" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="customerId must be a positive integer of up to 9 digits." scope="default" type="STRING"/>
+          <sequence key="Jamii_ErrorResponse"/>
+        </else>
+      </filter>
+    </inSequence>
+  </resource>
+
+  <!-- ===================== Bonus A: aggregation ===================== -->
+  <resource methods="GET" uri-template="/{customerId}/dashboard" faultSequence="Dashboard_BranchFault">
+    <inSequence>
+      <property name="jamii.api" value="customer-dashboard" scope="default" type="STRING"/>
+      <property name="jamii.rawRef" expression="get-property('uri.var.customerId')" scope="default" type="STRING"/>
+      <sequence key="Jamii_InitRequest"/>
+
+      <filter source="get-property('uri.var.customerId')" regex="^[1-9][0-9]{0,8}$">
+        <then>
+          <property name="REST_URL_POSTFIX" scope="axis2" action="remove"/>
+          <log category="INFO" level="custom">
+            <property name="event" value="FAN_OUT"/>
+            <property name="api" expression="get-property('jamii.api')"/>
+            <property name="branches" value="profile,accounts"/>
+            <property name="ref" expression="get-property('jamii.maskedRef')"/>
+            <property name="requestId" expression="get-property('jamii.requestId')"/>
+          </log>
+          <clone id="jamiiDashboard" continueParent="false" sequential="false">
+            <!-- Branch 1: customer profile (HTTP / DummyJSON) -->
+            <target>
+              <sequence>
+                <property name="jamii.section" value="profile" scope="default" type="STRING"/>
+                <property name="jamii.backend" value="DummyJSON-users" scope="default" type="STRING"/>
+                <property name="jamii.backendType" value="HTTP" scope="default" type="STRING"/>
+                <header name="Accept" scope="transport" value="application/json"/>
+                <sequence key="Jamii_LogBackendCall"/>
+                <call>
+                  <endpoint key="CustomerBackendEP"/>
+                </call>
+                <sequence key="Jamii_LogBackendResponse"/>
+                <switch source="get-property('jamii.backendStatus')">
+                  <case regex="200">
+                    <payloadFactory media-type="json">
+                      <format>{"section":"profile","status":"OK","data":{"firstName":"$1","lastName":"$2","email":"$3","phone":"$4"}}</format>
+                      <args>
+                        <arg evaluator="json" expression="$.firstName"/>
+                        <arg evaluator="json" expression="$.lastName"/>
+                        <arg evaluator="json" expression="$.email"/>
+                        <arg evaluator="json" expression="$.phone"/>
+                      </args>
+                    </payloadFactory>
+                  </case>
+                  <case regex="404">
+                    <payloadFactory media-type="json">
+                      <format>{"section":"profile","status":"NOT_FOUND","reason":"CUSTOMER_NOT_FOUND"}</format>
+                      <args/>
+                    </payloadFactory>
+                  </case>
+                  <default>
+                    <payloadFactory media-type="json">
+                      <format>{"section":"profile","status":"UNAVAILABLE","reason":"BACKEND_ERROR"}</format>
+                      <args/>
+                    </payloadFactory>
+                  </default>
+                </switch>
+                <sequence key="Dashboard_Collect"/>
+              </sequence>
+            </target>
+            <!-- Branch 2: accounts (DB via data service) -->
+            <target>
+              <sequence>
+                <property name="jamii.section" value="accounts" scope="default" type="STRING"/>
+                <property name="jamii.backend" value="JamiiAccountDataService" scope="default" type="STRING"/>
+                <property name="jamii.backendType" value="DATABASE" scope="default" type="STRING"/>
+                <header name="Accept" scope="transport" value="application/json"/>
+                <sequence key="Jamii_LogBackendCall"/>
+                <call>
+                  <endpoint key="JamiiCustomerAccountsDataServiceEP"/>
+                </call>
+                <sequence key="Jamii_LogBackendResponse"/>
+                <filter source="get-property('jamii.backendStatus')" regex="200">
+                  <then>
+                    <payloadFactory media-type="json">
+                      <format>{"section":"accounts","status":"OK","data":$1}</format>
+                      <args>
+                        <arg evaluator="json" expression="$"/>
+                      </args>
+                    </payloadFactory>
+                  </then>
+                  <else>
+                    <payloadFactory media-type="json">
+                      <format>{"section":"accounts","status":"UNAVAILABLE","reason":"DATABASE_UNAVAILABLE"}</format>
+                      <args/>
+                    </payloadFactory>
+                  </else>
+                </filter>
+                <sequence key="Dashboard_Collect"/>
+              </sequence>
+            </target>
+          </clone>
+        </then>
+        <else>
+          <property name="jamii.err.status" value="400" scope="default" type="STRING"/>
+          <property name="jamii.err.code" value="INVALID_CUSTOMER_ID" scope="default" type="STRING"/>
+          <property name="jamii.err.message" value="customerId must be a positive integer of up to 9 digits." scope="default" type="STRING"/>
+          <sequence key="Jamii_ErrorResponse"/>
+        </else>
+      </filter>
+    </inSequence>
+  </resource>
+</api>

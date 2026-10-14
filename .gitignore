@@ -1,0 +1,9 @@
+dist/
+reports/
+.tools/
+.m2/
+mi/JamiiIntegrations/target/
+docker/runtime/mi-carbonapps/*.car
+__pycache__/
+.pytest_cache/
+deploy/environments/sim.env

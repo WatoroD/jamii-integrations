@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fault sequence for the dashboard resource. A fault inside a clone branch (timeout, connection
+  refused, suspended endpoint) must not abort the whole request: the branch is converted into an
+  UNAVAILABLE section and handed to the aggregator like a normal reply. Faults outside a branch
+  (jamii.section not set) fall through to the standard handler.
+-->
+<sequence name="Dashboard_BranchFault" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+  <filter xpath="string-length(get-property('jamii.section')) &gt; 0">
+    <then>
+      <property name="jamii.dash.reason" value="UNAVAILABLE" scope="default" type="STRING"/>
+      <filter source="get-property('ERROR_CODE')" regex="101504|101505|101508">
+        <then>
+          <property name="jamii.dash.reason" value="TIMEOUT" scope="default" type="STRING"/>
+        </then>
+      </filter>
+      <log category="WARN" level="custom">
+        <property name="event" value="BRANCH_FAULT"/>
+        <property name="section" expression="get-property('jamii.section')"/>
+        <property name="errorCode" expression="get-property('ERROR_CODE')"/>
+        <property name="reason" expression="get-property('jamii.dash.reason')"/>
+        <property name="requestId" expression="get-property('jamii.requestId')"/>
+      </log>
+      <payloadFactory media-type="json">
+        <format>{"section":"$1","status":"UNAVAILABLE","reason":"$2"}</format>
+        <args>
+          <arg evaluator="xml" expression="get-property('jamii.section')"/>
+          <arg evaluator="xml" expression="get-property('jamii.dash.reason')"/>
+        </args>
+      </payloadFactory>
+      <sequence key="Dashboard_Collect"/>
+    </then>
+    <else>
+      <sequence key="Jamii_FaultHandler"/>
+    </else>
+  </filter>
+</sequence>

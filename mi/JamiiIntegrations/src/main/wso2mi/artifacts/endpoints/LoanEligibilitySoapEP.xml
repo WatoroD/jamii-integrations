@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  1c backend: DNE Online Calculator SOAP 1.1 service (http://www.dneonline.com/calculator.asmx),
+  operation Divide, standing in for a legacy SOAP affordability engine.
+  Address injected per environment: LOAN_SOAP_BACKEND_URL=http://www.dneonline.com/calculator.asmx
+-->
+<endpoint name="LoanEligibilitySoapEP" xmlns="http://ws.apache.org/ns/synapse">
+  <address uri="$SYSTEM:LOAN_SOAP_BACKEND_URL" format="soap11">
+    <timeout>
+      <duration>8000</duration>
+      <responseAction>fault</responseAction>
+    </timeout>
+    <markForSuspension>
+      <errorCodes>101503,101504,101505,101508</errorCodes>
+      <retriesBeforeSuspension>2</retriesBeforeSuspension>
+      <retryDelay>0</retryDelay>
+    </markForSuspension>
+    <suspendOnFailure>
+      <errorCodes>101503,101504,101505,101508</errorCodes>
+      <initialDuration>5000</initialDuration>
+      <progressionFactor>2.0</progressionFactor>
+      <maximumDuration>30000</maximumDuration>
+    </suspendOnFailure>
+  </address>
+</endpoint>

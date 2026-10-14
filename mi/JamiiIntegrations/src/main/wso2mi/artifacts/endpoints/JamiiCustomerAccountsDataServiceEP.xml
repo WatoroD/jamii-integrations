@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bonus A: accounts-by-customer query on the same internal data service. -->
+<endpoint name="JamiiCustomerAccountsDataServiceEP" xmlns="http://ws.apache.org/ns/synapse">
+  <http method="get" uri-template="http://localhost:8290/services/JamiiAccountDataService/customers/{uri.var.customerId}/accounts">
+    <timeout>
+      <duration>3000</duration>
+      <responseAction>fault</responseAction>
+    </timeout>
+    <suspendOnFailure>
+      <errorCodes>-1</errorCodes>
+      <initialDuration>0</initialDuration>
+      <progressionFactor>1.0</progressionFactor>
+      <maximumDuration>0</maximumDuration>
+    </suspendOnFailure>
+    <markForSuspension>
+      <errorCodes>-1</errorCodes>
+    </markForSuspension>
+  </http>
+</endpoint>

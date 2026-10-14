@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Internal data service. NOT exposed through APIM - only called over loopback by
+  JamiiAccountBalanceAPI (1a) and the dashboard aggregation (bonus A).
+
+  * All queries are parameterised (JDBC PreparedStatement '?' binding) - no string concatenation.
+  * Connection details are injected from environment variables ($SYSTEM:...) so the same
+    CAR is promoted unchanged from dev to prod.
+  * Runtime DB user is read-only (see db/01-schema.sql).
+-->
+<data name="JamiiAccountDataService" serviceNamespace="http://ws.jamii.co.ke/accounts"
+      transports="http https" serviceStatus="active">
+  <description>Read-only access to Jamii core account records</description>
+
+  <config id="JamiiCoreDB">
+    <property name="driverClassName">$SYSTEM:JAMII_DB_DRIVER</property>
+    <property name="url">$SYSTEM:JAMII_DB_URL</property>
+    <property name="username">$SYSTEM:JAMII_DB_USER</property>
+    <property name="password">$SYSTEM:JAMII_DB_PASSWORD</property>
+    <property name="minIdle">1</property>
+    <property name="maxActive">20</property>
+    <property name="maxWait">3000</property>
+    <property name="testOnBorrow">true</property>
+    <property name="validationQuery">SELECT 1</property>
+    <property name="validationInterval">30000</property>
+  </config>
+
+  <!-- 1a: single account by number -->
+  <query id="getAccountBalance" useConfig="JamiiCoreDB">
+    <sql>SELECT account_number, status, balance, currency FROM accounts WHERE account_number = ?</sql>
+    <properties>
+      <property name="queryTimeout">3</property>
+    </properties>
+    <result element="Accounts" rowName="Account" defaultNamespace="http://ws.jamii.co.ke/accounts">
+      <element column="account_number" name="accountNumber" xsdType="string"/>
+      <element column="status" name="status" xsdType="string"/>
+      <element column="balance" name="balance" xsdType="decimal"/>
+      <element column="currency" name="currency" xsdType="string"/>
+    </result>
+    <param name="accountNumber" paramType="SCALAR" sqlType="STRING" type="IN" ordinal="1"/>
+  </query>
+
+  <!-- Bonus A: all accounts for a customer -->
+  <query id="getAccountsByCustomer" useConfig="JamiiCoreDB">
+    <sql>SELECT account_number, account_type, status, balance, currency FROM accounts WHERE customer_id = ? ORDER BY account_number</sql>
+    <properties>
+      <property name="queryTimeout">3</property>
+    </properties>
+    <!-- Distinct element names: MI's JSON writer keys its schema on the element name, so reusing
+         Accounts/Account with a different column set fails with "schema element not found". -->
+    <result element="CustomerAccounts" rowName="CustomerAccount" defaultNamespace="http://ws.jamii.co.ke/accounts">
+      <element column="account_number" name="accountNumber" xsdType="string"/>
+      <element column="account_type" name="accountType" xsdType="string"/>
+      <element column="status" name="status" xsdType="string"/>
+      <element column="balance" name="balance" xsdType="decimal"/>
+      <element column="currency" name="currency" xsdType="string"/>
+    </result>
+    <param name="customerId" paramType="SCALAR" sqlType="INTEGER" type="IN" ordinal="1"/>
+  </query>
+
+  <resource method="GET" path="accounts/{accountNumber}">
+    <call-query href="getAccountBalance">
+      <with-param name="accountNumber" query-param="accountNumber"/>
+    </call-query>
+  </resource>
+
+  <resource method="GET" path="customers/{customerId}/accounts">
+    <call-query href="getAccountsByCustomer">
+      <with-param name="customerId" query-param="customerId"/>
+    </call-query>
+  </resource>
+</data>

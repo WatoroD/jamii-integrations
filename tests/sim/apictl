@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Fake apictl: records every call; keeps "deployed" API state as files; can be told to fail.
+# Mirrors real apictl 4.4 quirks seen against APIM: `export` exits 0 even when the API is absent,
+# product commands need -v, and an API cannot be deleted while a product still uses it.
+STATE="${SIM_STATE:?}"; mkdir -p "$STATE/apim"
+echo "apictl $*" >> "$STATE/apictl.log"
+cmd="$1 $2"
+# Flag values by name, parsed from "$@" so paths containing spaces survive.
+flag() { local want="$1" prev=""; shift; for a in "$@"; do [[ "$prev" == "$want" ]] && { echo "$a"; return; }; prev="$a"; done; }
+name_of_bundle() { basename "$1" .zip; }
+case "$cmd" in
+  "remove env"|"add env"|"login "*) exit 0 ;;
+  "export api")
+    n=$(flag -n "$@"); v=$(flag -v "$@")
+    [[ -f "$STATE/apim/${n}-${v}" ]] || { echo '{"code":900967,"message":"General Error"}'; exit 0; }
+    mkdir -p "$HOME/.wso2apictl/exported/apis/sim"; cp "$STATE/apim/${n}-${v}" "$HOME/.wso2apictl/exported/apis/sim/${n}_${v}.zip"; exit 0 ;;
+  "export api-product")
+    [[ "$*" == *" -v "* ]] || { echo 'required flag(s) "version" not set' >&2; exit 1; }
+    [[ -f "$STATE/apim/product" ]] || { echo '{"code":900967,"message":"General Error"}'; exit 0; }
+    mkdir -p "$HOME/.wso2apictl/exported/api-products/sim"
+    cp "$STATE/apim/product" "$HOME/.wso2apictl/exported/api-products/sim/JamiiCoreBanking_1.0.0.zip"; exit 0 ;;
+  "import api")
+    f=$(flag -f "$@"); b=$(name_of_bundle "$f")
+    if [[ -n "${SIM_FAIL_IMPORT:-}" && "$f" == *"${SIM_FAIL_IMPORT}"* && "$f" == *dist* ]]; then echo "simulated import failure" >&2; exit 1; fi
+    if [[ "$f" == *dist* ]]; then echo "new-${BUILD_NUMBER}" > "$STATE/apim/$b"; else cp "$f" "$STATE/apim/$b"; fi; exit 0 ;;
+  "import api-product")
+    f=$(flag -f "$@")
+    if [[ "$f" == *dist* ]]; then echo "new-${BUILD_NUMBER}" > "$STATE/apim/product"
+      # Real APIM 4.4 returned 500 *after* creating the product: fail half-applied.
+      [[ -n "${SIM_FAIL_PRODUCT:-}" ]] && { echo "Error importing API Product. 500" >&2; exit 1; }
+    else cp "$f" "$STATE/apim/product"; fi; exit 0 ;;
+  "delete api")
+    [[ -f "$STATE/apim/product" ]] && { echo "409 Conflict: used by one or more API Products" >&2; exit 1; }
+    n=$(flag -n "$@"); v=$(flag -v "$@"); rm -f "$STATE/apim/${n}-${v}"; exit 0 ;;
+  "delete api-product")
+    [[ "$*" == *" -v "* ]] || { echo 'required flag(s) "version" not set' >&2; exit 1; }
+    rm -f "$STATE/apim/product"; exit 0 ;;
+esac
+echo "fake apictl: unhandled: $*" >&2; exit 2

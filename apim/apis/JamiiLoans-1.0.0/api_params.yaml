@@ -1,0 +1,22 @@
+# Environment-specific overrides applied by `apictl import api --params`.
+environments:
+- name: dev
+  configs:
+    endpoints:
+      production:
+        url: http://jamii-mi:8290/loans
+      sandbox:
+        url: http://jamii-mi:8290/loans
+    deploymentEnvironments:
+    - displayOnDevportal: true
+      deploymentEnvironment: Default
+- name: prod
+  configs:
+    endpoints:
+      production:
+        url: https://mi.prod.jamii.internal:8253/loans
+      sandbox:
+        url: https://mi.uat.jamii.internal:8253/loans
+    deploymentEnvironments:
+    - displayOnDevportal: true
+      deploymentEnvironment: Default
