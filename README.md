@@ -62,6 +62,8 @@ curl -sk -H "apikey: $API_KEY" -H 'Content-Type: application/json' \
   https://localhost:8243/jamii/loans/1.0.0/eligibility | jq
 ```
 
+**Walkthrough video:** [docs/demo/jamii-walkthrough.mp4](docs/demo/jamii-walkthrough.mp4) (3:50) - a live call to each of the three APIs through the APIM gateway, including error cases, plus the dashboard and the masked MI logs.
+
 **Live walkthrough:** `scripts/demo.sh` makes each call through the APIM gateway as an onboarded consumer would (Enter to advance; `DEMO_AUTO=1` runs on a timer).
 
 Seed accounts: `1000000001`-`1000000007` (ACTIVE, DORMANT, CLOSED, a USD account). Customer IDs 1-5 own accounts; IDs map onto DummyJSON users.
